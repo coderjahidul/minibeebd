@@ -175,6 +175,116 @@
       }
     }
 
+    /* Honey landing — product picker list (matches dashboard-style rows) */
+    .honey-picker-row {
+      display: flex;
+      align-items: center;
+      gap: 0.875rem;
+    }
+
+    .honey-row-radio {
+      flex-shrink: 0;
+      appearance: none;
+      width: 1.375rem;
+      height: 1.375rem;
+      border: 2px solid #1e3a5f;
+      border-radius: 50%;
+      background: #fff;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+
+    .honey-row-radio:checked {
+      background: #22c55e;
+      border-color: #1e3a5f;
+      box-shadow: inset 0 0 0 3px #fff;
+    }
+
+    .honey-row-radio:focus-visible {
+      outline: 2px solid #ffc107;
+      outline-offset: 2px;
+    }
+
+    .honey-picker-card {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.875rem 1rem;
+      background: #fff9e1;
+      border: 1px solid #d4b896;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .honey-picker-row input[type="radio"]:checked + .honey-picker-card {
+      border-color: #c9a227;
+      box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.45);
+    }
+
+    .honey-picker-thumb {
+      width: 4.5rem;
+      height: 4.5rem;
+      border-radius: 8px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    @media (min-width: 768px) {
+      .honey-picker-thumb {
+        width: 5.5rem;
+        height: 5.5rem;
+      }
+    }
+
+    .honey-picker-title {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-weight: 700;
+      color: #4a3428;
+      font-size: 1.05rem;
+      line-height: 1.35;
+    }
+
+    @media (min-width: 768px) {
+      .honey-picker-title {
+        font-size: 1.15rem;
+      }
+    }
+
+    .honey-picker-sub {
+      font-size: 0.95rem;
+      color: #1a1a1a;
+      font-weight: 500;
+    }
+
+    .honey-picker-price-old {
+      font-size: 0.95rem;
+      color: #b45309;
+      text-decoration: line-through;
+      text-decoration-color: #dc2626;
+    }
+
+    .honey-picker-price-new {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #111827;
+      line-height: 1.2;
+    }
+
+    .honey-picker-row input[type="radio"]:checked + .honey-picker-card .honey-picker-price-new {
+      color: #e6a000;
+    }
+
+    .honey-picker-price-accent {
+      margin-top: 0.35rem;
+      width: 2rem;
+      height: 3px;
+      border-radius: 2px;
+      background: #6d8c3c;
+    }
+
     @keyframes underline-grow {
 
       0%,
@@ -1208,11 +1318,11 @@
   <section class="bg-white px-6 py-20">
     <h2 class="mb-12 text-center text-4xl font-bold md:text-5xl">প্রাইস</h2>
     @if ($honeyShowProductPicker)
-      <p class="mx-auto mb-8 max-w-3xl text-center text-lg text-gray-700">
+      <p class="mx-auto mb-10 max-w-2xl text-center text-base text-gray-700 md:text-lg">
         অর্ডার করার জন্য নিচে থেকে একটি পণ্য নির্বাচন করুন। চেকআউটে শুধু নির্বাচিত পণ্যটিই যাবে।
       </p>
     @endif
-    <div class="mx-auto max-w-6xl {{ $honeyShowProductPicker ? 'grid gap-6 md:grid-cols-2' : 'space-y-10' }}">
+    <div class="mx-auto max-w-3xl {{ $honeyShowProductPicker ? 'space-y-4' : 'space-y-10' }}">
       @forelse ($honeyProductLines as $idx => $line)
         @php
           $regularPrice = (float) ($line['regular_price'] ?? 0);
@@ -1220,44 +1330,43 @@
           if ($offerPrice == 0 && $regularPrice > 0) {
               $offerPrice = $regularPrice;
           }
+          $pickerTitle = $line['title'] ?? '';
+          $pickerParen = trim((string) ($line['quantity'] ?? ''));
         @endphp
         @if ($honeyShowProductPicker)
-          <label class="relative block cursor-pointer">
-            <input type="radio" name="honey_selected_line" value="{{ $idx }}" class="peer sr-only"
+          <div class="honey-picker-row">
+            <input type="radio" name="honey_selected_line" id="honey_sel_line_{{ $idx }}" value="{{ $idx }}"
+                   class="honey-row-radio"
                    {{ $loop->first ? 'checked' : '' }}
                    onchange="onHoneyProductLineChange(); updateTotal(); saveIncompleteOrder();">
-            <div class="rounded-2xl border-2 border-amber-200 bg-gradient-to-r from-yellow-50 to-amber-50 p-6 shadow-md transition-all peer-checked:border-honey peer-checked:ring-2 peer-checked:ring-amber-400 hover:border-amber-400 md:p-8">
-            <div class="grid items-center gap-6 md:grid-cols-2">
-              <div class="text-center md:text-left">
-                @if (!empty($line['image']))
-                  <img src="{{ asset($line['image']) }}" alt="{{ $line['title'] ?? 'Product' }}"
-                       class="mx-auto h-48 w-48 rounded-xl object-cover md:mx-0 md:h-56 md:w-56">
-                @endif
-              </div>
-              <div>
-                @if (!empty($line['title']))
-                  <h3 class="mb-2 text-2xl font-bold">{{ $line['title'] }}</h3>
-                @endif
-                @if (!empty($line['quantity']))
-                  <p class="mb-4 text-lg text-gray-700">{{ $line['quantity'] }}</p>
-                @endif
-                <div class="flex flex-col md:items-start">
-                  @if ($regularPrice > 0 && $regularPrice > $offerPrice)
-                    <span class="price-cross">৳ {{ number_format($regularPrice, 0) }}</span>
-                  @endif
-                  @if ($offerPrice > 0)
-                    <span class="text-honey price-offer text-2xl font-bold">৳ {{ number_format($offerPrice, 0) }}</span>
+            <label for="honey_sel_line_{{ $idx }}" class="honey-picker-card">
+              @if (!empty($line['image']))
+                <img src="{{ asset($line['image']) }}" alt="{{ $pickerTitle }}" class="honey-picker-thumb">
+              @else
+                <div class="honey-picker-thumb flex-shrink-0 bg-amber-100/80"></div>
+              @endif
+              <div class="min-w-0 flex-1">
+                <div class="honey-picker-title">
+                  {{ $pickerTitle }}
+                  @if ($pickerParen !== '')
+                    <span class="honey-picker-sub font-normal">({{ $pickerParen }})</span>
                   @endif
                 </div>
                 @if (!empty($line['short_description']))
-                  <p class="mt-4 text-base text-gray-700">{{ $line['short_description'] }}</p>
+                  <p class="mt-1 line-clamp-2 text-sm text-gray-600">{{ $line['short_description'] }}</p>
                 @endif
-                <a href="#checkout" onclick="event.preventDefault(); document.getElementById('checkout')?.scrollIntoView({behavior:'smooth'});"
-                   class="mt-4 inline-block text-honey underline">চেকআউটে যান →</a>
+                <div class="mt-2 flex flex-col gap-0.5">
+                  @if ($regularPrice > 0 && $regularPrice > $offerPrice)
+                    <span class="honey-picker-price-old">৳ {{ number_format($regularPrice, 0) }}</span>
+                  @endif
+                  @if ($offerPrice > 0)
+                    <span class="honey-picker-price-new">৳ {{ number_format($offerPrice, 0) }}</span>
+                    <span class="honey-picker-price-accent" aria-hidden="true"></span>
+                  @endif
+                </div>
               </div>
-            </div>
-            </div>
-          </label>
+            </label>
+          </div>
         @else
           <div class="border-honey rounded-2xl border-2 bg-gradient-to-r from-yellow-50 to-amber-50 p-10 shadow-lg">
             <div class="grid items-center gap-8 md:grid-cols-2">
