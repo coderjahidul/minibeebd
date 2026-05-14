@@ -1322,7 +1322,7 @@
         অর্ডার করার জন্য নিচে থেকে একটি পণ্য নির্বাচন করুন। চেকআউটে শুধু নির্বাচিত পণ্যটিই যাবে।
       </p>
     @endif
-    <div class="mx-auto max-w-3xl {{ $honeyShowProductPicker ? 'space-y-4' : 'space-y-10' }}">
+    <div class="mx-auto max-w-6xl {{ $honeyShowProductPicker ? 'space-y-4' : 'space-y-10' }}">
       @forelse ($honeyProductLines as $idx => $line)
         @php
           $regularPrice = (float) ($line['regular_price'] ?? 0);
