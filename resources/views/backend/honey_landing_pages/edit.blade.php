@@ -464,16 +464,26 @@
                       </select>
                     </div>
 
+                    @php
+                      $selectedProductIds = $page->content['product']['product_ids'] ?? null;
+                      if (!is_array($selectedProductIds)) {
+                        $selectedProductIds = [];
+                      }
+                      $selectedProductIds = array_map('intval', array_filter($selectedProductIds));
+                      if (empty($selectedProductIds) && !empty($page->content['product']['product_id'])) {
+                        $selectedProductIds = [(int) $page->content['product']['product_id']];
+                      }
+                    @endphp
                     <div class="mb-3" id="existing-product-field" style="display: {{ ($page->content['product']['type'] ?? 'static') == 'existing' ? 'block' : 'none' }};">
-                      <label class="form-label">Select Product</label>
-                      <select name="content[product][product_id]" class="form-select">
-                        <option value="">Select Product</option>
+                      <label class="form-label">Select Products</label>
+                      <select name="content[product][product_ids][]" class="form-select" multiple size="8" id="honey-product-ids">
                         @foreach($products as $product)
-                          <option value="{{ $product->id }}" {{ ($page->content['product']['product_id'] ?? '') == $product->id ? 'selected' : '' }}>
+                          <option value="{{ $product->id }}" {{ in_array((int) $product->id, $selectedProductIds, true) ? 'selected' : '' }}>
                             {{ $product->name }}
                           </option>
                         @endforeach
                       </select>
+                      <small class="text-muted">Hold Ctrl (Windows) or Cmd (Mac) to select multiple products. Order matches selection order.</small>
                     </div>
 
                     <div id="static-product-fields" style="display: {{ ($page->content['product']['type'] ?? 'static') == 'static' ? 'block' : 'none' }};">
@@ -557,12 +567,17 @@ $(document).ready(function() {
   $('#product-type').on('change', function() {
     if ($(this).val() == 'existing') {
       $('#existing-product-field').show();
+      $('#honey-product-ids').prop('disabled', false);
       $('#static-product-fields').hide();
     } else {
       $('#existing-product-field').hide();
+      $('#honey-product-ids').prop('disabled', true);
       $('#static-product-fields').show();
     }
   });
+  if ($('#product-type').val() !== 'existing') {
+    $('#honey-product-ids').prop('disabled', true);
+  }
 
   // Add Question
   var questionIndex = {{ isset($page->content['hero']['questions']) ? count($page->content['hero']['questions']) : 0 }};

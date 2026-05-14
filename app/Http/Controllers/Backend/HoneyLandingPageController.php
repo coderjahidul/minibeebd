@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\HoneyLandingPage;
 use App\Models\Product;
-use Illuminate\Support\Facades\Log;
 
 class HoneyLandingPageController extends Controller
 {
@@ -50,6 +49,8 @@ class HoneyLandingPageController extends Controller
             'product' => [
                 'type' => 'static',
                 'product_id' => null,
+                'product_ids' => [],
+                'items' => [],
                 'title' => '',
                 'image' => '',
                 'quantity' => '',
@@ -230,62 +231,87 @@ class HoneyLandingPageController extends Controller
 
             case 'product':
                 $productType = $request->input('content.product.type', 'static');
-                $productId = $request->input('content.product.product_id');
-                
+                $existingProduct = $content['product'] ?? [];
+
                 $productData = [
                     'type' => $productType,
-                    'product_id' => $productId,
+                    'product_id' => null,
+                    'product_ids' => [],
+                    'items' => [],
                     'title' => $request->input('content.product.title', ''),
-                    'image' => $content['product']['image'] ?? '',
+                    'image' => $existingProduct['image'] ?? '',
                     'quantity' => $request->input('content.product.quantity', ''),
                     'regular_price' => $request->input('content.product.regular_price'),
                     'offer_price' => $request->input('content.product.offer_price'),
                     'short_description' => $request->input('content.product.short_description', '')
                 ];
-                
-                // If existing product is selected, fetch and populate product data
-                if ($productType === 'existing' && !empty($productId)) {
-                    $product = Product::where('id', $productId)->where('status', 1)->first();
 
-                    Log::info('honey_landing_page_product: '.json_encode($product));
-                    
-                    if ($product) {
-                        // Get product image path (save as path, not full URL for consistency)
+                if ($productType === 'existing') {
+                    $rawIds = $request->input('content.product.product_ids', []);
+                    if (! is_array($rawIds)) {
+                        $rawIds = $rawIds !== null && $rawIds !== '' ? [$rawIds] : [];
+                    }
+                    $productIds = array_values(array_unique(array_filter(array_map('intval', $rawIds))));
+                    if ($productIds === [] && ! $request->has('content.product.product_ids')) {
+                        $productIds = $existingProduct['product_ids'] ?? [];
+                        if ($productIds === [] && ! empty($existingProduct['product_id'])) {
+                            $productIds = [(int) $existingProduct['product_id']];
+                        }
+                    }
+
+                    $items = [];
+                    foreach ($productIds as $pid) {
+                        $product = Product::where('id', $pid)->where('status', 1)->first();
+                        if (! $product) {
+                            continue;
+                        }
                         $productImage = '';
-                        if (!empty($product->image)) {
-                            // Save as path relative to public directory (e.g., 'products/image.jpg')
-                            $productImage = 'products/' . $product->image;
+                        if (! empty($product->image)) {
+                            $productImage = 'products/'.$product->image;
                         }
-                        
-                        // Determine prices: regular_price = sell_price (original selling price)
-                        // offer_price = after_discount (if exists and > 0) OR sell_price (fallback)
-                        // This ensures discounts are properly displayed
-                        $regularPrice = !empty($product->sell_price) ? (float)$product->sell_price : 0;
-                        
-                        // Use after_discount as offer_price if it exists and is greater than 0
-                        // Otherwise, use sell_price as offer_price (no discount)
+                        $regularPrice = ! empty($product->sell_price) ? (float) $product->sell_price : 0;
                         $offerPrice = 0;
-                        if (!empty($product->after_discount) && (float)$product->after_discount > 0) {
-                            $offerPrice = (float)$product->after_discount;
+                        if (! empty($product->after_discount) && (float) $product->after_discount > 0) {
+                            $offerPrice = (float) $product->after_discount;
                         } else {
-                            $offerPrice = $regularPrice; // No discount, use sell_price as offer_price
+                            $offerPrice = $regularPrice;
                         }
-                        
-                        // Populate product data from existing product
-                        $productData['title'] = $product->name;
-                        $productData['image'] = $productImage;
-                        $productData['regular_price'] = $regularPrice;
-                        $productData['offer_price'] = $offerPrice;
-                        $productData['quantity'] = ''; // Clear quantity for existing products
-                        $productData['short_description'] = ''; // Clear description for existing products
+                        $items[] = [
+                            'product_id' => $product->id,
+                            'title' => $product->name,
+                            'image' => $productImage,
+                            'regular_price' => $regularPrice,
+                            'offer_price' => $offerPrice,
+                            'quantity' => '',
+                            'short_description' => '',
+                        ];
+                    }
+
+                    $productData['product_ids'] = array_column($items, 'product_id');
+                    $productData['items'] = $items;
+                    $first = $items[0] ?? null;
+                    if ($first) {
+                        $productData['product_id'] = $first['product_id'];
+                        $productData['title'] = $first['title'];
+                        $productData['image'] = $first['image'];
+                        $productData['regular_price'] = $first['regular_price'];
+                        $productData['offer_price'] = $first['offer_price'];
+                        $productData['quantity'] = $first['quantity'];
+                        $productData['short_description'] = $first['short_description'];
+                    }
+                } else {
+                    if ($request->hasFile('product_image')) {
+                        $productData['image'] = $this->handleFileUpload($request->file('product_image'), 'honey_landing');
                     }
                 }
-                
-                // Handle manual image upload (for static products or to override existing product image)
-                if ($request->hasFile('product_image')) {
-                    $productData['image'] = $this->handleFileUpload($request->file('product_image'), 'honey_landing');
+
+                if ($productType === 'existing' && empty($productData['items'])) {
+                    return response()->json([
+                        'status' => false,
+                        'msg' => 'Select at least one active product, or switch to Static Product.',
+                    ], 422);
                 }
-                
+
                 $content['product'] = $productData;
                 break;
         }

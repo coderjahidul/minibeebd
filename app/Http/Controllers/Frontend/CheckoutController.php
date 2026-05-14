@@ -940,6 +940,33 @@ class CheckoutController extends Controller
 
             $productContent = $honeyPage->content['product'];
 
+        $checkoutLines = $this->resolveHoneyCheckoutLines($productContent);
+        if (count($checkoutLines) === 0) {
+            return response()->json([
+                'success' => false,
+                'msg' => 'Product information not available. For existing products, select at least one active product.',
+            ], 422);
+        }
+
+        $lineCount = count($checkoutLines);
+        $selectedIndex = $request->input('selected_line_index');
+        if ($lineCount > 1) {
+            if ($selectedIndex === null || $selectedIndex === '') {
+                return response()->json([
+                    'success' => false,
+                    'msg' => 'অনুগ্রহ করে প্রাইস সেকশন থেকে একটি পণ্য নির্বাচন করুন।',
+                ], 422);
+            }
+            $selectedIndex = (int) $selectedIndex;
+            if ($selectedIndex < 0 || $selectedIndex >= $lineCount) {
+                return response()->json([
+                    'success' => false,
+                    'msg' => 'অবৈধ পণ্য নির্বাচন।',
+                ], 422);
+            }
+            $checkoutLines = [$checkoutLines[$selectedIndex]];
+        }
+
         DB::beginTransaction();
         try {
             // 3. Create/Update Guest User
@@ -952,127 +979,100 @@ class CheckoutController extends Controller
                 ]
             );
 
-            // 4. Resolve Product and Variation
-            $product = null;
-            $variation = null;
-            $finalPrice = 0;
-            $basePriceForDiscount = 0;
-            $productId = null;
-            $variationId = null;
-            $quantity = 1;
-            $isStock = 0;
+            // 4. Resolve product line(s) from landing page content (single static, single existing, or multiple existing)
+            $detailRows = [];
+            $stockOps = [];
+            $subtotal = 0;
+            $totalDiscount = 0;
 
-            if (!empty($productContent['product_id'])) {
-                // Dynamic Product
-                $product = Product::where('id', $productContent['product_id'])
+            foreach ($checkoutLines as $entry) {
+                $quantity = 1;
+                if ($entry['mode'] === 'static') {
+                    $line = $entry['line'];
+                    $staticProductData = [
+                        'title' => $line['title'] ?? 'MiniBee Honey Box',
+                        'image' => $line['image'] ?? '',
+                        'quantity' => $line['quantity'] ?? '৪ গ্রাম × ৫০টি স্যাচেট',
+                        'regular_price' => ! empty($line['regular_price']) ? (float) $line['regular_price'] : 550,
+                        'offer_price' => ! empty($line['offer_price']) ? (float) $line['offer_price'] : null,
+                        'short_description' => $line['short_description'] ?? '',
+                    ];
+
+                    $finalPrice = ! empty($staticProductData['offer_price'])
+                        ? $staticProductData['offer_price']
+                        : $staticProductData['regular_price'];
+                    $basePriceForDiscount = $staticProductData['regular_price'];
+
+                    $placeholderProduct = Product::where('status', 1)->first();
+                    if (! $placeholderProduct) {
+                        throw new \Exception('No products available. Please create at least one product in the system.');
+                    }
+
+                    $discountPerUnit = 0;
+                    if ($basePriceForDiscount > $finalPrice) {
+                        $discountPerUnit = $basePriceForDiscount - $finalPrice;
+                    }
+
+                    $subtotal += $finalPrice * $quantity;
+                    $totalDiscount += $discountPerUnit * $quantity;
+
+                    $detailRows[] = [
+                        'product_id' => $placeholderProduct->id,
+                        'variation_id' => null,
+                        'quantity' => $quantity,
+                        'unit_price' => $finalPrice,
+                        'discount' => $discountPerUnit,
+                        'is_stock' => 0,
+                        'purchase_price' => $placeholderProduct->purchase_price ?? 0,
+                    ];
+
+                    continue;
+                }
+
+                $line = $entry['line'];
+                $product = Product::where('id', $line['product_id'])
                     ->where('status', 1)
                     ->first();
 
-                if (!$product) {
+                if (! $product) {
                     throw new \Exception('Product not available.');
                 }
 
-                $productId = $product->id;
                 $isStock = $product->is_stock ?? 0;
-
-                // Get first variation
                 $variation = Variation::where('product_id', $product->id)->first();
-                if ($variation) {
-                    $variationId = $variation->id;
+                $variationId = $variation ? $variation->id : null;
+
+                [$finalPrice, $basePriceForDiscount] = $this->honeyLineFinalPrices($product, $variation, $line);
+
+                $discountPerUnit = 0;
+                if ($basePriceForDiscount > $finalPrice) {
+                    $discountPerUnit = $basePriceForDiscount - $finalPrice;
                 }
 
-                // Price calculation with priority: Honey page offer_price takes precedence
-                // First check if honey page has offer_price or regular_price
-                $honeyPageOfferPrice = !empty($productContent['offer_price']) ? (float) $productContent['offer_price'] : null;
-                $honeyPageRegularPrice = !empty($productContent['regular_price']) ? (float) $productContent['regular_price'] : null;
-                
-                // Honey page prices have highest priority - use them if available
-                if ($honeyPageOfferPrice !== null && $honeyPageOfferPrice > 0) {
-                    // Use honey page offer_price (highest priority)
-                    $finalPrice = $honeyPageOfferPrice;
-                    $basePriceForDiscount = $honeyPageRegularPrice ?? (float) $product->sell_price;
-                } elseif ($honeyPageRegularPrice !== null && $honeyPageRegularPrice > 0) {
-                    // Use honey page regular_price if no offer_price
-                    $finalPrice = $honeyPageRegularPrice;
-                    $basePriceForDiscount = (float) $product->sell_price;
-                } else {
-                    // No honey page prices - check variation prices first, then product model
-                    if ($variation) {
-                        if (!empty($variation->discount_price) && $variation->discount_price > 0) {
-                            $finalPrice = (float) $variation->discount_price;
-                            $basePriceForDiscount = (float) $variation->price;
-                        } elseif (!empty($variation->price) && $variation->price > 0) {
-                            $finalPrice = (float) $variation->price;
-                            $basePriceForDiscount = (float) $variation->price;
-                        } else {
-                            // Fall back to product model prices
-                            $baseFinalPrice = (isset($product->after_discount) && $product->after_discount > 0)
-                                ? (float) $product->after_discount
-                                : (float) $product->sell_price;
-                            $finalPrice = $baseFinalPrice;
-                            $basePriceForDiscount = (float) $product->sell_price;
-                        }
-                    } else {
-                        // No variation - use product model prices
-                        $baseFinalPrice = (isset($product->after_discount) && $product->after_discount > 0)
-                            ? (float) $product->after_discount
-                            : (float) $product->sell_price;
-                        $finalPrice = $baseFinalPrice;
-                        $basePriceForDiscount = (float) $product->sell_price;
-                    }
-                }
-
-                // Check stock if stock management is enabled
                 if ($isStock && $variation) {
                     $availableStock = $this->util->checkProductStock($product->id, $variation->id);
                     if ($availableStock < $quantity) {
                         throw new \Exception('Stock not available!');
                     }
                 }
-            } else {
-                // Static Product - use static data from content
-                // Create static product data array
-                $staticProductData = [
-                    'title' => $productContent['title'] ?? 'MiniBee Honey Box',
-                    'image' => $productContent['image'] ?? '',
-                    'quantity' => $productContent['quantity'] ?? '৪ গ্রাম × ৫০টি স্যাচেট',
-                    'regular_price' => !empty($productContent['regular_price']) ? (float) $productContent['regular_price'] : 550,
-                    'offer_price' => !empty($productContent['offer_price']) ? (float) $productContent['offer_price'] : null,
-                    'short_description' => $productContent['short_description'] ?? ''
+
+                $subtotal += $finalPrice * $quantity;
+                $totalDiscount += $discountPerUnit * $quantity;
+
+                $detailRows[] = [
+                    'product_id' => $product->id,
+                    'variation_id' => $variationId,
+                    'quantity' => $quantity,
+                    'unit_price' => $finalPrice,
+                    'discount' => $discountPerUnit,
+                    'is_stock' => $isStock,
+                    'purchase_price' => $product->purchase_price ?? 0,
                 ];
 
-                // Use static pricing
-                $finalPrice = !empty($staticProductData['offer_price']) 
-                    ? $staticProductData['offer_price']
-                    : $staticProductData['regular_price'];
-                $basePriceForDiscount = $staticProductData['regular_price'];
-
-                // For static products, we need a placeholder product_id for database constraint
-                // Try to find a default product or use product_id = 1 as fallback
-                $placeholderProduct = Product::where('status', 1)->first();
-                if ($placeholderProduct) {
-                    $productId = $placeholderProduct->id;
-                    $product = $placeholderProduct;
-                } else {
-                    // If no products exist, we'll need to handle this differently
-                    // For now, throw an error asking to create at least one product
-                    throw new \Exception('No products available. Please create at least one product in the system.');
+                if ($isStock && $variation) {
+                    $stockOps[] = ['product_id' => $product->id, 'variation_id' => $variation->id, 'quantity' => $quantity];
                 }
-
-                // Set variation to null for static products
-                $variationId = null;
-                $variation = null;
-                $isStock = 0;
             }
-
-            // Calculate discount
-            $discountPerUnit = 0;
-            if ($basePriceForDiscount > $finalPrice) {
-                $discountPerUnit = $basePriceForDiscount - $finalPrice;
-            }
-
-            $totalDiscount = $discountPerUnit * $quantity;
-            $subtotal = $finalPrice * $quantity;
 
             // 5. Calculate Totals
             $shippingCharge = $deliveryCharge->amount;
@@ -1082,7 +1082,7 @@ class CheckoutController extends Controller
             $usrs = DB::table('model_has_roles')->where('role_id', 8)->get();
             $verified_users = [];
 
-            foreach($usrs as $u) {
+            foreach ($usrs as $u) {
                 $test = DB::table('users')->where('id', $u->model_id)->first();
                 if ($test && $test->status == 1) {
                     $verified_users[] = $u->model_id;
@@ -1090,7 +1090,7 @@ class CheckoutController extends Controller
             }
 
             $assignUserId = 1;
-            if (!empty($verified_users)) {
+            if (! empty($verified_users)) {
                 $keyValue = array_rand($verified_users);
                 $assignUserId = $verified_users[$keyValue];
             }
@@ -1106,37 +1106,25 @@ class CheckoutController extends Controller
                 'shipping_address' => $data['address'],
                 'delivery_charge_id' => $data['delivery_charge_id'],
                 'shipping_charge' => $shippingCharge,
-                'amount' => $subtotal, // Use subtotal (discounted price), not subtotal + discount
+                'amount' => $subtotal,
                 'final_amount' => $finalAmount,
                 'discount' => $totalDiscount,
                 'status' => 'pending',
                 'date' => date('Y-m-d'),
                 'payment_status' => 'due',
                 'invoice_no' => $invoiceNo,
-                'assign_user_id' => $assignUserId
+                'assign_user_id' => $assignUserId,
             ];
 
             $order = Order::create($orderData);
 
-            // 9. Create OrderDetails Record
-            $orderDetailsData = [
-                'product_id' => $productId,
-                'variation_id' => $variationId,
-                'quantity' => $quantity,
-                'unit_price' => $finalPrice,
-                'discount' => $discountPerUnit,
-                'is_stock' => $isStock
-            ];
-
-            if ($product) {
-                $orderDetailsData['purchase_price'] = $product->purchase_price ?? 0;
+            // 9. Create OrderDetails Records
+            foreach ($detailRows as $orderDetailsData) {
+                $order->details()->create($orderDetailsData);
             }
 
-            $order->details()->create($orderDetailsData);
-
-            // Decrease stock if stock management is enabled
-            if ($isStock && $product && $variation) {
-                $this->util->decreaseProductStock($product->id, $variation->id, $quantity);
+            foreach ($stockOps as $op) {
+                $this->util->decreaseProductStock($op['product_id'], $op['variation_id'], $op['quantity']);
             }
 
             // 10. Handle Payment
@@ -1203,6 +1191,92 @@ class CheckoutController extends Controller
                 'msg' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * @return array{0: float, 1: float} [finalPrice, basePriceForDiscount]
+     */
+    private function honeyLineFinalPrices(Product $product, ?Variation $variation, array $line): array
+    {
+        $honeyPageOfferPrice = isset($line['offer_price']) && $line['offer_price'] !== '' && $line['offer_price'] !== null
+            ? (float) $line['offer_price'] : null;
+        if ($honeyPageOfferPrice !== null && $honeyPageOfferPrice <= 0) {
+            $honeyPageOfferPrice = null;
+        }
+        $honeyPageRegularPrice = isset($line['regular_price']) && $line['regular_price'] !== '' && $line['regular_price'] !== null
+            ? (float) $line['regular_price'] : null;
+        if ($honeyPageRegularPrice !== null && $honeyPageRegularPrice <= 0) {
+            $honeyPageRegularPrice = null;
+        }
+
+        if ($honeyPageOfferPrice !== null && $honeyPageOfferPrice > 0) {
+            return [
+                $honeyPageOfferPrice,
+                $honeyPageRegularPrice ?? (float) $product->sell_price,
+            ];
+        }
+        if ($honeyPageRegularPrice !== null && $honeyPageRegularPrice > 0) {
+            return [
+                $honeyPageRegularPrice,
+                (float) $product->sell_price,
+            ];
+        }
+
+        if ($variation) {
+            if (! empty($variation->discount_price) && $variation->discount_price > 0) {
+                return [(float) $variation->discount_price, (float) $variation->price];
+            }
+            if (! empty($variation->price) && $variation->price > 0) {
+                return [(float) $variation->price, (float) $variation->price];
+            }
+        }
+
+        $baseFinalPrice = (isset($product->after_discount) && $product->after_discount > 0)
+            ? (float) $product->after_discount
+            : (float) $product->sell_price;
+
+        return [$baseFinalPrice, (float) $product->sell_price];
+    }
+
+    /**
+     * @return array<int, array{mode: string, line: array<string, mixed>}>
+     */
+    private function resolveHoneyCheckoutLines(array $productContent): array
+    {
+        $type = $productContent['type'] ?? 'static';
+        $lines = [];
+
+        if ($type === 'existing') {
+            $items = $productContent['items'] ?? [];
+            if (is_array($items) && count($items) > 0) {
+                foreach ($items as $line) {
+                    if (! empty($line['product_id'])) {
+                        $lines[] = ['mode' => 'existing', 'line' => $line];
+                    }
+                }
+            }
+            if (count($lines) === 0 && ! empty($productContent['product_id'])) {
+                $lines[] = [
+                    'mode' => 'existing',
+                    'line' => [
+                        'product_id' => (int) $productContent['product_id'],
+                        'title' => $productContent['title'] ?? '',
+                        'image' => $productContent['image'] ?? '',
+                        'regular_price' => $productContent['regular_price'] ?? null,
+                        'offer_price' => $productContent['offer_price'] ?? null,
+                        'quantity' => $productContent['quantity'] ?? '',
+                        'short_description' => $productContent['short_description'] ?? '',
+                    ],
+                ];
+            }
+            if (count($lines) === 0) {
+                return [];
+            }
+
+            return $lines;
+        }
+
+        return [['mode' => 'static', 'line' => $productContent]];
     }
 
     /**

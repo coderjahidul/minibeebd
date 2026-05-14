@@ -380,21 +380,61 @@
     }
   </style>
 
-{{-- 1. FIRST: Calculate the Product Price so the variable exists --}}
+{{-- 1. FIRST: Normalize product lines; default selection = first line (checkout is one product at a time) --}}
 @php
-    $productPrice = 0;
-    if (
-        isset($honeyPage) &&
-        isset($honeyPage->content['product']['offer_price']) &&
-        $honeyPage->content['product']['offer_price']
-    ) {
-        $productPrice = $honeyPage->content['product']['offer_price'];
-    } elseif (
-        isset($honeyPage) &&
-        isset($honeyPage->content['product']['regular_price']) &&
-        $honeyPage->content['product']['regular_price']
-    ) {
-        $productPrice = $honeyPage->content['product']['regular_price'];
+    $honeyProductLines = [];
+    if (isset($honeyPage) && isset($honeyPage->content['product'])) {
+        $pc = $honeyPage->content['product'];
+        if (
+            ($pc['type'] ?? '') === 'existing' &&
+            !empty($pc['items']) &&
+            is_array($pc['items'])
+        ) {
+            foreach ($pc['items'] as $line) {
+                if (!empty($line['title']) || !empty($line['image'])) {
+                    $honeyProductLines[] = $line;
+                }
+            }
+        }
+        if (count($honeyProductLines) === 0) {
+            $hasLegacy = !empty($pc['title']) || !empty($pc['image']) || !empty($pc['offer_price']) || !empty($pc['regular_price']);
+            if ($hasLegacy) {
+                $honeyProductLines[] = [
+                    'product_id' => $pc['product_id'] ?? null,
+                    'title' => $pc['title'] ?? '',
+                    'image' => $pc['image'] ?? '',
+                    'quantity' => $pc['quantity'] ?? '',
+                    'regular_price' => $pc['regular_price'] ?? null,
+                    'offer_price' => $pc['offer_price'] ?? null,
+                    'short_description' => $pc['short_description'] ?? '',
+                ];
+            }
+        }
+    }
+    $honeyLineUnitPrice = function (array $line): float {
+        $lineOffer = isset($line['offer_price']) ? (float) $line['offer_price'] : 0;
+        $lineReg = isset($line['regular_price']) ? (float) $line['regular_price'] : 0;
+        if ($lineOffer > 0) {
+            return $lineOffer;
+        }
+        if ($lineReg > 0) {
+            return $lineReg;
+        }
+        return 0;
+    };
+    $honeyShowProductPicker = count($honeyProductLines) > 1;
+    $firstLine = $honeyProductLines[0] ?? [];
+    $honeySelectedUnitPrice = $firstLine ? $honeyLineUnitPrice($firstLine) : 0;
+    $productPrice = $honeySelectedUnitPrice;
+    $honeyLinesJson = [];
+    foreach ($honeyProductLines as $idx => $line) {
+        $honeyLinesJson[] = [
+            'index' => $idx,
+            'title' => $line['title'] ?? '',
+            'image' => !empty($line['image']) ? asset($line['image']) : '',
+            'quantity' => $line['quantity'] ?? '',
+            'unitPrice' => $honeyLineUnitPrice($line),
+        ];
     }
 @endphp
 
@@ -1167,66 +1207,98 @@
   <!-- Pricing Section -->
   <section class="bg-white px-6 py-20">
     <h2 class="mb-12 text-center text-4xl font-bold md:text-5xl">প্রাইস</h2>
-    <div class="mx-auto max-w-6xl">
-      <div class="border-honey rounded-2xl border-2 bg-gradient-to-r from-yellow-50 to-amber-50 p-10 shadow-lg">
-        <div class="grid items-center gap-8 md:grid-cols-2">
-          <div class="text-center md:text-left">
-            <div class="mb-6">
-              @if ($honeyPage && isset($honeyPage->content['product']['image']) && $honeyPage->content['product']['image'])
-                <img src="{{ asset($honeyPage->content['product']['image']) }}" alt="Product Image"
-                     class="mx-auto mb-6 h-64 w-64 rounded-xl object-cover md:mx-0">
-              @endif
-            </div>
-          </div>
-          <div>
-            @if ($honeyPage && isset($honeyPage->content['product']['title']) && $honeyPage->content['product']['title'])
-              <h3 class="mb-3 text-3xl font-bold">{{ $honeyPage->content['product']['title'] }}</h3>
-            @endif
-
-            @if ($honeyPage && isset($honeyPage->content['product']['quantity']) && $honeyPage->content['product']['quantity'])
-              <p class="mb-6 text-xl">{{ $honeyPage->content['product']['quantity'] }}</p>
-            @endif
-
-            <div class="mb-6 flex items-center justify-start">
-              <div class="flex flex-col items-center">
-                @php
-                  $regularPrice = 0;
-                  $offerPrice = 0;
-                  if ($honeyPage && isset($honeyPage->content['product']['regular_price'])) {
-                      $regularPrice = (float) ($honeyPage->content['product']['regular_price'] ?? 0);
-                  }
-                  if ($honeyPage && isset($honeyPage->content['product']['offer_price'])) {
-                      $offerPrice = (float) ($honeyPage->content['product']['offer_price'] ?? 0);
-                  }
-                  // If offer_price is not set, use regular_price as offer_price
-                  if ($offerPrice == 0 && $regularPrice > 0) {
-                      $offerPrice = $regularPrice;
-                  }
-                @endphp
-                @if ($regularPrice > 0 && $regularPrice > $offerPrice)
-                  <span class="price-cross">৳ {{ number_format($regularPrice, 0) }}</span>
+    @if ($honeyShowProductPicker)
+      <p class="mx-auto mb-8 max-w-3xl text-center text-lg text-gray-700">
+        অর্ডার করার জন্য নিচে থেকে একটি পণ্য নির্বাচন করুন। চেকআউটে শুধু নির্বাচিত পণ্যটিই যাবে।
+      </p>
+    @endif
+    <div class="mx-auto max-w-6xl {{ $honeyShowProductPicker ? 'grid gap-6 md:grid-cols-2' : 'space-y-10' }}">
+      @forelse ($honeyProductLines as $idx => $line)
+        @php
+          $regularPrice = (float) ($line['regular_price'] ?? 0);
+          $offerPrice = (float) ($line['offer_price'] ?? 0);
+          if ($offerPrice == 0 && $regularPrice > 0) {
+              $offerPrice = $regularPrice;
+          }
+        @endphp
+        @if ($honeyShowProductPicker)
+          <label class="relative block cursor-pointer">
+            <input type="radio" name="honey_selected_line" value="{{ $idx }}" class="peer sr-only"
+                   {{ $loop->first ? 'checked' : '' }}
+                   onchange="onHoneyProductLineChange(); updateTotal(); saveIncompleteOrder();">
+            <div class="rounded-2xl border-2 border-amber-200 bg-gradient-to-r from-yellow-50 to-amber-50 p-6 shadow-md transition-all peer-checked:border-honey peer-checked:ring-2 peer-checked:ring-amber-400 hover:border-amber-400 md:p-8">
+            <div class="grid items-center gap-6 md:grid-cols-2">
+              <div class="text-center md:text-left">
+                @if (!empty($line['image']))
+                  <img src="{{ asset($line['image']) }}" alt="{{ $line['title'] ?? 'Product' }}"
+                       class="mx-auto h-48 w-48 rounded-xl object-cover md:mx-0 md:h-56 md:w-56">
                 @endif
-                @if ($offerPrice > 0)
-                  <span class="text-honey price-offer font-bold">৳
-                    {{ number_format($offerPrice, 0) }}</span>
+              </div>
+              <div>
+                @if (!empty($line['title']))
+                  <h3 class="mb-2 text-2xl font-bold">{{ $line['title'] }}</h3>
+                @endif
+                @if (!empty($line['quantity']))
+                  <p class="mb-4 text-lg text-gray-700">{{ $line['quantity'] }}</p>
+                @endif
+                <div class="flex flex-col md:items-start">
+                  @if ($regularPrice > 0 && $regularPrice > $offerPrice)
+                    <span class="price-cross">৳ {{ number_format($regularPrice, 0) }}</span>
+                  @endif
+                  @if ($offerPrice > 0)
+                    <span class="text-honey price-offer text-2xl font-bold">৳ {{ number_format($offerPrice, 0) }}</span>
+                  @endif
+                </div>
+                @if (!empty($line['short_description']))
+                  <p class="mt-4 text-base text-gray-700">{{ $line['short_description'] }}</p>
+                @endif
+                <a href="#checkout" onclick="event.preventDefault(); document.getElementById('checkout')?.scrollIntoView({behavior:'smooth'});"
+                   class="mt-4 inline-block text-honey underline">চেকআউটে যান →</a>
+              </div>
+            </div>
+            </div>
+          </label>
+        @else
+          <div class="border-honey rounded-2xl border-2 bg-gradient-to-r from-yellow-50 to-amber-50 p-10 shadow-lg">
+            <div class="grid items-center gap-8 md:grid-cols-2">
+              <div class="text-center md:text-left">
+                <div class="mb-6">
+                  @if (!empty($line['image']))
+                    <img src="{{ asset($line['image']) }}" alt="{{ $line['title'] ?? 'Product' }}"
+                         class="mx-auto mb-6 h-64 w-64 rounded-xl object-cover md:mx-0">
+                  @endif
+                </div>
+              </div>
+              <div>
+                @if (!empty($line['title']))
+                  <h3 class="mb-3 text-3xl font-bold">{{ $line['title'] }}</h3>
+                @endif
+                @if (!empty($line['quantity']))
+                  <p class="mb-6 text-xl">{{ $line['quantity'] }}</p>
+                @endif
+                <div class="mb-6 flex items-center justify-start">
+                  <div class="flex flex-col items-center md:items-start">
+                    @if ($regularPrice > 0 && $regularPrice > $offerPrice)
+                      <span class="price-cross">৳ {{ number_format($regularPrice, 0) }}</span>
+                    @endif
+                    @if ($offerPrice > 0)
+                      <span class="text-honey price-offer font-bold">৳
+                        {{ number_format($offerPrice, 0) }}</span>
+                    @endif
+                  </div>
+                </div>
+                @if (!empty($line['short_description']))
+                  <p class="mb-8 text-lg">{{ $line['short_description'] }}</p>
                 @endif
               </div>
             </div>
-
-            @if (
-                $honeyPage &&
-                    isset($honeyPage->content['product']['short_description']) &&
-                    $honeyPage->content['product']['short_description']
-            )
-              <p class="mb-8 text-lg">{{ $honeyPage->content['product']['short_description'] }}</p>
-            @endif
-
-            {{-- <a href="#checkout"
-                            class="bg-honey hover:bg-honeyDark text-white px-8 py-4 rounded-xl text-lg font-semibold inline-block">অর্ডার
-                            করুন</a> --}}
           </div>
+        @endif
+      @empty
+        <div class="border-honey rounded-2xl border-2 bg-gradient-to-r from-yellow-50 to-amber-50 p-10 text-center text-gray-600 shadow-lg">
+          Product details will appear here once configured in the admin.
         </div>
-      </div>
+      @endforelse
     </div>
   </section>
 
@@ -1328,42 +1400,19 @@
       <div class="rounded-2xl bg-white p-8 shadow-lg md:h-[70%]">
         <h3 class="mb-6 text-2xl font-bold">অর্ডার সারাংশ</h3>
 
-        <!-- Product Info -->
+        <!-- Product Info (নির্বাচিত পণ্য — একাধিক থাকলে প্রাইস সেকশন থেকে বেছে নিন) -->
         <div class="mb-6 border-b-2 pb-6">
-          <div class="mb-4 flex gap-4">
-            @if ($honeyPage && isset($honeyPage->content['product']['image']) && $honeyPage->content['product']['image'])
-              <img src="{{ asset($honeyPage->content['product']['image']) }}" alt="Product"
-                   class="h-24 w-24 rounded-lg object-cover">
-            @endif
-            <div class="flex-1">
-              @if ($honeyPage && isset($honeyPage->content['product']['title']) && $honeyPage->content['product']['title'])
-                <h4 class="mb-1 text-xl font-semibold">{{ $honeyPage->content['product']['title'] }}
-                </h4>
-              @endif
-
-              @if ($honeyPage && isset($honeyPage->content['product']['quantity']) && $honeyPage->content['product']['quantity'])
-                <p class="text-lg text-gray-600">{{ $honeyPage->content['product']['quantity'] }}</p>
-              @endif
-
-              @php
-                $productPrice = 0;
-                if (
-                    $honeyPage &&
-                    isset($honeyPage->content['product']['offer_price']) &&
-                    $honeyPage->content['product']['offer_price']
-                ) {
-                    $productPrice = $honeyPage->content['product']['offer_price'];
-                } elseif (
-                    $honeyPage &&
-                    isset($honeyPage->content['product']['regular_price']) &&
-                    $honeyPage->content['product']['regular_price']
-                ) {
-                    $productPrice = $honeyPage->content['product']['regular_price'];
-                }
-              @endphp
-              @if ($productPrice > 0)
-                <p class="text-honey mt-2 text-xl font-bold">৳ {{ $productPrice }}</p>
-              @endif
+          <div id="honeyOrderSummaryRow" class="flex gap-4">
+            <img id="honeySummaryImg" src="{{ !empty($firstLine['image']) ? asset($firstLine['image']) : '' }}" alt=""
+                 class="{{ empty($firstLine['image']) ? 'hidden' : '' }} h-24 w-24 flex-shrink-0 rounded-lg object-cover">
+            <div class="min-w-0 flex-1">
+              <h4 id="honeySummaryTitle" class="mb-1 text-xl font-semibold">{{ $firstLine['title'] ?? '' }}</h4>
+              <p id="honeySummaryQty" class="text-lg text-gray-600">{{ $firstLine['quantity'] ?? '' }}</p>
+              <p id="honeySummaryUnit" class="text-honey mt-2 text-xl font-bold">
+                @if ($honeySelectedUnitPrice > 0)
+                  ৳ {{ number_format($honeySelectedUnitPrice, 0) }}
+                @endif
+              </p>
             </div>
           </div>
         </div>
@@ -1372,7 +1421,7 @@
         <div class="mb-6 space-y-4">
           <div class="flex justify-between text-lg">
             <span>পণ্যের মূল্য:</span>
-            <span class="font-semibold" id="productPrice">৳ {{ $productPrice }}</span>
+            <span class="font-semibold" id="productPrice">৳ {{ number_format($honeySelectedUnitPrice, 0) }}</span>
           </div>
           <div class="flex justify-between text-lg">
             <span>শিপিং চার্জ:</span>
@@ -1380,11 +1429,11 @@
           </div>
           <div class="flex justify-between border-t-2 pt-4 text-lg">
             <span>সাবটোটাল:</span>
-            <span class="font-semibold" id="subtotal">৳ {{ $productPrice }}</span>
+            <span class="font-semibold" id="subtotal">৳ {{ number_format($honeySelectedUnitPrice, 0) }}</span>
           </div>
           <div class="flex justify-between border-t-2 pt-4 text-2xl font-bold">
             <span>মোট:</span>
-            <span class="text-honey" id="total">৳ {{ $productPrice }}</span>
+            <span class="text-honey" id="total">৳ {{ number_format($honeySelectedUnitPrice, 0) }}</span>
           </div>
         </div>
 
@@ -1401,6 +1450,58 @@
        href="https://nixsoftware.net" target="_blank" class="text-blue-500 hover:text-blue-700">Nix Software</a>
   </footer>
 <script>
+    window.HONEY_LINES = @json($honeyLinesJson);
+    window.HONEY_MULTI = @json($honeyShowProductPicker);
+
+    function getHoneySelectedLineIndex() {
+      const el = document.querySelector('input[name="honey_selected_line"]:checked');
+      if (el) {
+        return parseInt(el.value, 10);
+      }
+      return 0;
+    }
+
+    function getHoneySelectedUnitPrice() {
+      const lines = window.HONEY_LINES || [];
+      const i = getHoneySelectedLineIndex();
+      if (!lines[i]) {
+        return 0;
+      }
+      const p = lines[i].unitPrice;
+      return p != null ? Number(p) : 0;
+    }
+
+    function onHoneyProductLineChange() {
+      const lines = window.HONEY_LINES || [];
+      const i = getHoneySelectedLineIndex();
+      const row = lines[i];
+      if (!row) {
+        return;
+      }
+      const img = document.getElementById('honeySummaryImg');
+      if (img) {
+        if (row.image) {
+          img.src = row.image;
+          img.classList.remove('hidden');
+        } else {
+          img.removeAttribute('src');
+          img.classList.add('hidden');
+        }
+      }
+      const t = document.getElementById('honeySummaryTitle');
+      if (t) {
+        t.textContent = row.title || '';
+      }
+      const q = document.getElementById('honeySummaryQty');
+      if (q) {
+        q.textContent = row.quantity || '';
+      }
+      const u = document.getElementById('honeySummaryUnit');
+      if (u) {
+        u.textContent = row.unitPrice > 0 ? ('৳ ' + Math.round(Number(row.unitPrice))) : '';
+      }
+    }
+
     // Debounce utility function (1.5 second delay)
     function debounce(func, wait) {
       let timeout;
@@ -1503,24 +1604,22 @@
       if (screenshotInput) {
         screenshotInput.addEventListener('change', saveIncompleteOrder);
       }
+      onHoneyProductLineChange();
+      updateTotal();
     });
 
     function updateTotal() {
-      @php
-        $productPrice = 0;
-        if ($honeyPage && isset($honeyPage->content['product']['offer_price']) && $honeyPage->content['product']['offer_price']) {
-            $productPrice = $honeyPage->content['product']['offer_price'];
-        } elseif ($honeyPage && isset($honeyPage->content['product']['regular_price']) && $honeyPage->content['product']['regular_price']) {
-            $productPrice = $honeyPage->content['product']['regular_price'];
-        }
-      @endphp
-      const productPrice = {{ $productPrice }};
+      const productPrice = Math.round(getHoneySelectedUnitPrice());
       const shippingRadio = document.querySelector('input[name="shipping"]:checked');
       const shippingCharge = shippingRadio ? parseInt(shippingRadio.getAttribute('data-amount')) : 0;
       const subtotal = productPrice;
       const total = productPrice + shippingCharge;
 
       document.getElementById('shippingCharge').textContent = '৳ ' + shippingCharge;
+      const productPriceEl = document.getElementById('productPrice');
+      if (productPriceEl) {
+        productPriceEl.textContent = '৳ ' + productPrice;
+      }
       document.getElementById('subtotal').textContent = '৳ ' + subtotal;
       document.getElementById('total').textContent = '৳ ' + total;
     }
@@ -1556,6 +1655,14 @@
       if (!name || !phone || !address || !shipping || !payment) {
         alert('অনুগ্রহ করে সব তথ্য পূরণ করুন');
         return;
+      }
+
+      if (window.HONEY_MULTI) {
+        const linePick = document.querySelector('input[name="honey_selected_line"]:checked');
+        if (!linePick) {
+          alert('অনুগ্রহ করে প্রাইস সেকশন থেকে একটি পণ্য নির্বাচন করুন');
+          return;
+        }
       }
 
       // Validate payment details if online payment
@@ -1594,6 +1701,7 @@
 
       // Add CSRF token
       formData.append('_token', '{{ csrf_token() }}');
+      formData.append('selected_line_index', String(getHoneySelectedLineIndex()));
 
       // Submit to backend
       fetch('{{ route('front.honey.checkout') }}', {
