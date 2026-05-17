@@ -82,6 +82,10 @@ class InformationController extends Controller{
             'primary_background2' => '',
             'primary_background3' => '',
             'gradient_code' => '',
+            'messenger_link' => '',
+            'phone_active' => '',
+            'messenger_active' => '',
+            'live_chat_active' => '',
         ]);
         
         $information = Information::findOrFail($id);

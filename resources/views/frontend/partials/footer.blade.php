@@ -358,6 +358,8 @@
 
 <div class="cart-dropdown" id="cart-dropdown"></div>
 
+@include('frontend.partials.live_chat_widget')
+
 @include('frontend.partials.js')
 
 </body>

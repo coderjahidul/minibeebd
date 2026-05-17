@@ -1896,6 +1896,8 @@
       }, 5000);
     }
   </script>
+
+  @include('frontend.partials.live_chat_widget')
 </body>
 
 </html>

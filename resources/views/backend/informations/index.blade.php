@@ -283,6 +283,56 @@
             </div>
           </div>
 
+          {{-- LIVE CHAT WIDGET --}}
+          <div class="card mb-3">
+            <div class="card-body">
+              <div class="card-section-title">Live Chat Widget</div>
+              <div class="row form-grid">
+                <div class="col-md-3">
+                  <label class="fw-semibold" for="live_chat_active">Widget Status</label>
+                  <select class="form-select" name="live_chat_active" id="live_chat_active">
+                    <option value="1" {{ $information->live_chat_active == '1' ? 'selected':'' }}>Active</option>
+                    <option value="0" {{ $information->live_chat_active == '0' ? 'selected':'' }}>DeActive</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
+                  <label class="fw-semibold" for="phone_active">Phone Button Status</label>
+                  <select class="form-select" name="phone_active" id="phone_active">
+                    <option value="1" {{ $information->phone_active == '1' ? 'selected':'' }}>Active</option>
+                    <option value="0" {{ $information->phone_active == '0' ? 'selected':'' }}>DeActive</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
+                  <label class="fw-semibold" for="whats_active">WhatsApp Button Status</label>
+                  <select class="form-select" name="whats_active" id="whats_active">
+                    <option value="1" {{ $information->whats_active == '1' ? 'selected':'' }}>Active</option>
+                    <option value="0" {{ $information->whats_active == '0' ? 'selected':'' }}>DeActive</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
+                  <label class="fw-semibold" for="messenger_active">Messenger Button Status</label>
+                  <select class="form-select" name="messenger_active" id="messenger_active">
+                    <option value="1" {{ $information->messenger_active == '1' ? 'selected':'' }}>Active</option>
+                    <option value="0" {{ $information->messenger_active == '0' ? 'selected':'' }}>DeActive</option>
+                  </select>
+                </div>
+                
+                <div class="col-md-4 mt-3">
+                  <label class="fw-semibold" for="owner_phone">Phone Number</label>
+                  <input type="tel" id="owner_phone_widget" class="form-control" name="owner_phone" placeholder="+8801XXXXXXXXX" value="{{ $information->owner_phone }}">
+                </div>
+                <div class="col-md-4 mt-3">
+                  <label class="fw-semibold" for="whats_num">WhatsApp Number</label>
+                  <input type="tel" id="whats_num_widget" class="form-control" name="whats_num" placeholder="+8801XXXXXXXXX" value="{{ $information->whats_num }}">
+                </div>
+                <div class="col-md-4 mt-3">
+                  <label class="fw-semibold" for="messenger_link">Messenger Link</label>
+                  <input type="url" id="messenger_link" class="form-control" name="messenger_link" placeholder="https://m.me/yourpage" value="{{ $information->messenger_link }}">
+                </div>
+              </div>
+            </div>
+          </div>
+
           {{-- CHECKOUT & STYLE --}}
           <div class="card mb-3">
             <div class="card-body">
